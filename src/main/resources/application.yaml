@@ -1,0 +1,59 @@
+spring:
+  application:
+    name: linkly
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.batch_size: 50
+        order_inserts: true
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      timeout: 200ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+
+server:
+  port: 8080
+  compression:
+    enabled: true
+
+linkly:
+  base-url: ${LINKLY_BASE_URL:http://localhost:8080}
+  cache-ttl-seconds: 86400
+  rate-limit:
+    anonymous-per-minute: 10
+    authenticated-per-minute: 100
+  click-stream:
+    name: linkly:clicks
+    consumer-group: linkly-aggregators
+    consumer-name: ${HOSTNAME:consumer-1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    com.sagar.linkly: INFO
+    org.hibernate.SQL: WARN
