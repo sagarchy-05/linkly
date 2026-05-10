@@ -20,12 +20,13 @@ import java.util.Map;
 @Slf4j
 public class ClickEventConsumer {
     private final StringRedisTemplate redis;
-    private final LinkRepository linkRepo;
     private final ClickAggregator aggregator;
-    // separate component shown below
+
     @Value("${linkly.click-stream.name}") private String streamName;
     @Value("${linkly.click-stream.consumer-group}") private String group;
     @Value("${linkly.click-stream.consumer-name}") private String consumer;
+    @Value("${linkly.click-stream.batch-size:200}") private int batchSize;
+    @Value("${linkly.click-stream.block-millis:500}") private long blockMillis;
 
     @PostConstruct
     public void initGroup() {
@@ -34,20 +35,24 @@ public class ClickEventConsumer {
         } catch (Exception ignored) { /* group already exists */ }
     }
 
-    @Scheduled(fixedDelay = 1000)
+    @Scheduled(fixedDelayString = "${linkly.click-stream.poll-delay:1000}")
     public void consume() {
         List<MapRecord<String, Object, Object>> records = redis.opsForStream().read(
                 Consumer.from(group, consumer),
-                StreamReadOptions.empty().count(200).block(Duration.ofMillis(500)),
+                StreamReadOptions.empty().count(batchSize).block(Duration.ofMillis(blockMillis)),
                 StreamOffset.create(streamName, ReadOffset.lastConsumed())
         );
+
         if (records == null || records.isEmpty()) return;
+
         Map<String, Long> codeToCount = new HashMap<>();
         for (MapRecord<String, Object, Object> r : records) {
             String code = String.valueOf(r.getValue().get("shortCode"));
             codeToCount.merge(code, 1L, Long::sum);
         }
+
         aggregator.flush(codeToCount);
+
         // Acknowledge
         for (MapRecord<String, Object, Object> r : records) {
             redis.opsForStream().acknowledge(streamName, group, r.getId());

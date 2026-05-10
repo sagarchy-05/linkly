@@ -48,20 +48,23 @@ public class ShortenerService {
             return new ShortenResponse(alias, baseUrl + "/" + alias, link.getLongUrl());
         }
 
-        // Auto-Generated Short Code Flow
+        String generatedCode;
+        do {
+            // Generates a random 7-character string (e.g., "a3f8b9e")
+            generatedCode = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 7);
+        } while (repository.existsByShortCode(generatedCode));
+
         Link link = Link.builder()
-                .shortCode(generatePlaceholder())
+                .shortCode(generatedCode)
                 .longUrl(req.longUrl())
                 .custom(false)
+                .expiresAt(computeExpiry(req.expiresInDays()))
                 .build();
-        link = repository.saveAndFlush(link);
 
-        String code = Base62.encode(link.getId());
-        link.setShortCode(code);
-        repository.save(link);
-        cachePut(code, link.getLongUrl());
+        link = repository.save(link);
+        cachePut(generatedCode, link.getLongUrl());
 
-        return new ShortenResponse(code, baseUrl + "/" + code, link.getLongUrl());
+        return new ShortenResponse(generatedCode, baseUrl + "/" + generatedCode, link.getLongUrl());
     }
 
     private void validate(String url) {
@@ -76,10 +79,6 @@ public class ShortenerService {
             return null;
         }
         return OffsetDateTime.now().plusDays(expiresInDays);
-    }
-
-    private String generatePlaceholder() {
-        return "tmp-" + System.nanoTime();
     }
 
     private String cacheKey(String code) { return "link:" + code; }

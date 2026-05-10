@@ -40,9 +40,17 @@ linkly:
     anonymous-per-minute: 10
     authenticated-per-minute: 100
   click-stream:
-    name: linkly:clicks
-    consumer-group: linkly-aggregators
-    consumer-name: ${HOSTNAME:consumer-1}
+    name: "click_events"
+    consumer-group: "linkly-group"
+    consumer-name: "linkly-worker-1"
+    poll-delay: ${STREAM_POLL_DELAY:1000}
+    batch-size: ${STREAM_BATCH_SIZE:200}
+    block-millis: ${STREAM_BLOCK_MILLIS:500}
+  async:
+    core-pool-size: ${ASYNC_CORE_POOL:4}
+    max-pool-size: ${ASYNC_MAX_POOL:16}
+    queue-capacity: ${ASYNC_QUEUE_CAPACITY:2000}
+
 
 management:
   endpoints:

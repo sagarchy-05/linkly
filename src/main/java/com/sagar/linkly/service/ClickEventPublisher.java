@@ -1,6 +1,5 @@
 package com.sagar.linkly.service;
 
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,16 +25,6 @@ public class ClickEventPublisher {
     @Async("clickPublisherExecutor")
     public void publish(String shortCode, String ipAddress, String referrer, String userAgent) {
         try {
-            // 🛡️ THE DEBOUNCE LOCK: Ignore duplicate clicks from the same IP within 3 seconds
-            String lockKey = "lock:click:" + shortCode + ":" + ipAddress;
-            Boolean isNewClick = redis.opsForValue().setIfAbsent(lockKey, "1", java.time.Duration.ofSeconds(10));
-
-            // If the key was already there, this is the phantom double-click!
-            if (Boolean.FALSE.equals(isNewClick)) {
-                System.out.println("🛡️ Blocked phantom double-click for: " + shortCode);
-                return;
-            }
-
             Map<String, String> body = Map.of(
                     "shortCode", shortCode,
                     "ipHash", hashIp(ipAddress),
@@ -46,7 +35,6 @@ public class ClickEventPublisher {
             MapRecord<String, String, String> record = StreamRecords.mapBacked(body)
                     .withStreamKey(streamName);
             redis.opsForStream().add(record);
-
         } catch (Exception e) {
             log.warn("Failed to publish click event: {}", e.getMessage());
         }
@@ -55,7 +43,8 @@ public class ClickEventPublisher {
     private String hashIp(String ip) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            md.update(secret.getBytes());return HexFormat.of().formatHex(md.digest(ip.getBytes())).substring(0, 16);
+            md.update(secret.getBytes());
+            return HexFormat.of().formatHex(md.digest(ip.getBytes())).substring(0, 16);
         } catch (Exception e) { return "unknown"; }
     }
     private String safe(String s) {

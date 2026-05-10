@@ -19,7 +19,7 @@ public class RateLimitFilter implements Filter {
     public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
             throws IOException, ServletException {
         HttpServletRequest http = (HttpServletRequest) req;
-        if ("POST".equals(http.getMethod()) && http.getRequestURI().startsWith("/api/shorten")) {
+        if ("POST".equals(http.getMethod()) && (http.getRequestURI().startsWith("/api/shorten") || http.getRequestURI().startsWith("/api/bulk-shorten"))) {
             String ip = http.getRemoteAddr();
             if (!limiter.tryAcquire(ip)) {
                 HttpServletResponse out = (HttpServletResponse) res;
