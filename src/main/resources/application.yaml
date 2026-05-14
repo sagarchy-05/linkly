@@ -42,7 +42,7 @@ linkly:
   click-stream:
     name: "click_events"
     consumer-group: "linkly-group"
-    consumer-name: "linkly-worker-1"
+    consumer-name: ${HOSTNAME:linkly-worker-1}
     poll-delay: ${STREAM_POLL_DELAY:1000}
     batch-size: ${STREAM_BATCH_SIZE:200}
     block-millis: ${STREAM_BLOCK_MILLIS:500}
