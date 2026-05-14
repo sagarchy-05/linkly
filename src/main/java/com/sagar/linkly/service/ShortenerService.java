@@ -50,8 +50,8 @@ public class ShortenerService {
 
         String generatedCode;
         do {
-            // Generates a random 7-character string (e.g., "a3f8b9e")
-            generatedCode = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 7);
+            // Random Base62 (a-zA-Z0-9), 7 chars, 62^7 ≈ 3.5T keyspace
+            generatedCode = Base62.randomCode(7);
         } while (repository.existsByShortCode(generatedCode));
 
         Link link = Link.builder()

@@ -49,6 +49,14 @@ services:
       SPRING_DATA_REDIS_TIMEOUT: 10s
       LINKLY_BASE_URL: ${LINKLY_BASE_URL}
       SPRING_PROFILES_ACTIVE: docker
+      # Async analytics thread pool
+      ASYNC_CORE_POOL: ${ASYNC_CORE_POOL}
+      ASYNC_MAX_POOL: ${ASYNC_MAX_POOL}
+      ASYNC_QUEUE_CAPACITY: ${ASYNC_QUEUE_CAPACITY}
+      # Redis stream consumer tuning
+      STREAM_POLL_DELAY: ${STREAM_POLL_DELAY}
+      STREAM_BATCH_SIZE: ${STREAM_BATCH_SIZE}
+      STREAM_BLOCK_MILLIS: ${STREAM_BLOCK_MILLIS}
     depends_on:
       postgres:
         condition: service_healthy
