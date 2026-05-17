@@ -16,7 +16,10 @@ import java.util.List;
 public class RateLimiterService {
     private final StringRedisTemplate redis;
     private DefaultRedisScript<List> script;
+
     @Value("${linkly.rate-limit.anonymous-per-minute}") private int anonRate;
+    @Value("${linkly.rate-limit.bulk-max}") private int bulkMax;
+    @Value("${linkly.rate-limit.bulk-minutes}") private int bulkMinutes;
 
     @PostConstruct
     public void init() {
@@ -25,11 +28,21 @@ public class RateLimiterService {
         script.setResultType(List.class);
     }
 
+    // For single /shorten requests
     public boolean tryAcquire(String identityKey) {
-        double refillPerSec = anonRate / 60.0;
+        return executeLua("rl:" + identityKey, anonRate, anonRate / 60.0);
+    }
+
+    // For /bulk-shorten requests
+    public boolean tryAcquireBulk(String identityKey) {
+        double refillPerSec = bulkMax / (bulkMinutes * 60.0);
+        return executeLua("rl:bulk:" + identityKey, bulkMax, refillPerSec);
+    }
+
+    private boolean executeLua(String key, int maxTokens, double refillPerSec) {
         List<?> result = redis.execute(script,
-                List.of("rl:" + identityKey),
-                String.valueOf(anonRate),
+                List.of(key),
+                String.valueOf(maxTokens),
                 String.valueOf(refillPerSec),
                 String.valueOf(Instant.now().getEpochSecond()),
                 "1");

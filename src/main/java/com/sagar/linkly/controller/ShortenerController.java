@@ -1,5 +1,6 @@
 package com.sagar.linkly.controller;
 
+import com.sagar.linkly.dto.BulkShortenResponse;
 import com.sagar.linkly.dto.ShortenRequest;
 import com.sagar.linkly.dto.ShortenResponse;
 import com.sagar.linkly.service.ShortenerService;
@@ -25,8 +26,15 @@ public class ShortenerController {
     }
 
     @PostMapping("/bulk-shorten")
-    public ResponseEntity<List<ShortenResponse>> bulk(@RequestBody List<ShortenRequest> reqs) {
-        if (reqs.size() > 100) throw new IllegalArgumentException("Max 100 per request");
-        return ResponseEntity.ok(reqs.stream().map(service::shorten).toList());
+    public ResponseEntity<BulkShortenResponse> bulk(@Valid @RequestBody List<ShortenRequest> reqs) {
+        BulkShortenResponse response = service.bulkShorten(reqs);
+
+        // If everything failed
+        if (response.successful().isEmpty() && !response.failed().isEmpty()) {
+            return ResponseEntity.badRequest().body(response);
+        }
+
+        // If it's a mix or all successful
+        return ResponseEntity.ok(response);
     }
 }

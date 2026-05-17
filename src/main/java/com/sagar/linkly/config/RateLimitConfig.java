@@ -16,8 +16,11 @@ public class RateLimitConfig {
         // Inject the service into the filter manually
         registrationBean.setFilter(new RateLimitFilter(rateLimiterService));
 
-        // ONLY apply rate limiting to the exact endpoint that creates links
-        registrationBean.addUrlPatterns("/api/shorten/*");
+        // Explicitly map all exact endpoints and their sub-paths
+        registrationBean.addUrlPatterns(
+                "/api/shorten",
+                "/api/bulk-shorten"
+        );
 
         // Set it to run early in the filter chain
         registrationBean.setOrder(1);

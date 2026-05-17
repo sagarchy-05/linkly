@@ -1,10 +1,13 @@
 package com.sagar.linkly.service;
 
 import com.sagar.linkly.domain.Link;
+import com.sagar.linkly.dto.BulkError;
+import com.sagar.linkly.dto.BulkShortenResponse;
 import com.sagar.linkly.dto.ShortenRequest;
 import com.sagar.linkly.dto.ShortenResponse;
 import com.sagar.linkly.encoding.Base62;
 import com.sagar.linkly.repository.LinkRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +17,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -24,18 +29,18 @@ public class ShortenerService {
 
     @Value("${linkly.base-url}") private String baseUrl;
     @Value("${linkly.cache-ttl-seconds}") private long cacheTtl;
+    @Value("${linkly.bulk-batch-size}") private int maxBulkSize;
 
     @Transactional
     public ShortenResponse shorten(ShortenRequest req) {
         validate(req.longUrl());
 
-        // Custom Alias Flow
+        // 1. Custom Alias Flow (The "Ask Forgiveness" Pattern)
         if (req.customAlias() != null && !req.customAlias().isBlank()) {
             String alias = req.customAlias().trim();
-            if (!alias.matches("[a-zA-Z0-9_-]{3,16}"))
+            if (!alias.matches("[a-zA-Z0-9_-]{3,16}")) {
                 throw new IllegalArgumentException("Invalid alias format");
-            if (repository.existsByShortCode(alias))
-                throw new IllegalArgumentException("Alias already taken");
+            }
 
             Link link = Link.builder()
                     .shortCode(alias)
@@ -43,28 +48,74 @@ public class ShortenerService {
                     .custom(true)
                     .expiresAt(computeExpiry(req.expiresInDays()))
                     .build();
-            link = repository.save(link);
+
+            try {
+                link = repository.save(link);
+                repository.flush(); // Force DB constraint check immediately
+            } catch (DataIntegrityViolationException e) {
+                throw new IllegalArgumentException("Alias already taken");
+            }
+
             cachePut(alias, link.getLongUrl());
             return new ShortenResponse(alias, baseUrl + "/" + alias, link.getLongUrl());
         }
 
-        String generatedCode;
-        do {
-            // Random Base62 (a-zA-Z0-9), 7 chars, 62^7 ≈ 3.5T keyspace
-            generatedCode = Base62.randomCode(7);
-        } while (repository.existsByShortCode(generatedCode));
+        // 2. Generated Code Flow (With Collision Retry Logic)
+        Link link = null;
+        int attempts = 0;
+        while (link == null && attempts < 5) {
+            String generatedCode = Base62.randomCode(7);
+            Link tempLink = Link.builder()
+                    .shortCode(generatedCode)
+                    .longUrl(req.longUrl())
+                    .custom(false)
+                    .expiresAt(computeExpiry(req.expiresInDays()))
+                    .build();
+            try {
+                link = repository.save(tempLink);
+                repository.flush();
+            } catch (DataIntegrityViolationException e) {
+                attempts++;
+                log.warn("Collision detected for generated code: {}, retrying...", generatedCode);
+                if (attempts >= 5) {
+                    throw new IllegalStateException("Failed to generate unique short code after 5 attempts");
+                }
+            }
+        }
 
-        Link link = Link.builder()
-                .shortCode(generatedCode)
-                .longUrl(req.longUrl())
-                .custom(false)
-                .expiresAt(computeExpiry(req.expiresInDays()))
-                .build();
+        cachePut(link.getShortCode(), link.getLongUrl());
+        return new ShortenResponse(link.getShortCode(), baseUrl + "/" + link.getShortCode(), link.getLongUrl());
+    }
 
-        link = repository.save(link);
-        cachePut(generatedCode, link.getLongUrl());
+    // 3. Bulk Shorten (The "All-or-Nothing" Pattern)
+    public BulkShortenResponse bulkShorten(List<ShortenRequest> reqs) {
+        if (reqs.size() > maxBulkSize) {
+            throw new IllegalArgumentException("Max " + maxBulkSize + " URLs per request");
+        }
 
-        return new ShortenResponse(generatedCode, baseUrl + "/" + generatedCode, link.getLongUrl());
+        List<ShortenResponse> successful = new ArrayList<>();
+        List<BulkError> failed = new ArrayList<>();
+
+        for (ShortenRequest req : reqs) {
+            try {
+                // Try to process the individual link
+                ShortenResponse response = this.shorten(req);
+                successful.add(response);
+            } catch (IllegalArgumentException e) {
+                // If it fails (e.g., alias taken, bad URL format), catch it!
+                failed.add(new BulkError(
+                        req.longUrl(),
+                        req.customAlias(),
+                        e.getMessage() // "Alias already taken", "URL too long", etc.
+                ));
+            } catch (Exception e) {
+                // Catch any unexpected database hiccups for this specific link
+                log.error("Unexpected error shortening URL: {}", req.longUrl(), e);
+                failed.add(new BulkError(req.longUrl(), req.customAlias(), "Internal processing error"));
+            }
+        }
+
+        return new BulkShortenResponse(successful, failed);
     }
 
     private void validate(String url) {

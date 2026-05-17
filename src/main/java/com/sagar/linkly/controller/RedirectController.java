@@ -29,8 +29,6 @@ public class RedirectController {
         // Always redirect, but only publish if it passes the debounce check
         if (debouncer.isUniqueClick(shortCode, ipAddress)) {
             publisher.publish(shortCode, ipAddress, req.getHeader("Referer"), req.getHeader("User-Agent"));
-        } else {
-            System.out.println("🛡️ Ignored duplicate click analytics for: " + shortCode);
         }
 
         return ResponseEntity.status(HttpStatus.FOUND)

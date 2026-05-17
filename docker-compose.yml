@@ -23,8 +23,12 @@ services:
     image: redis:7-alpine
     container_name: linkly-redis
     restart: unless-stopped
+    # Enable basic persistence (save every 60 seconds if at least 1 key changed)
+    command: redis-server --save 60 1 --loglevel warning
     ports:
       - "${HOST_REDIS_PORT}:6379"
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -44,19 +48,27 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-      SPRING_DATA_REDIS_HOST: ${REDIS_HOST}
-      SPRING_DATA_REDIS_PORT: ${REDIS_PORT}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_TIMEOUT: 10s
+
       LINKLY_BASE_URL: ${LINKLY_BASE_URL}
       SPRING_PROFILES_ACTIVE: docker
+
       # Async analytics thread pool
       ASYNC_CORE_POOL: ${ASYNC_CORE_POOL}
       ASYNC_MAX_POOL: ${ASYNC_MAX_POOL}
       ASYNC_QUEUE_CAPACITY: ${ASYNC_QUEUE_CAPACITY}
+
       # Redis stream consumer tuning
       STREAM_POLL_DELAY: ${STREAM_POLL_DELAY}
       STREAM_BATCH_SIZE: ${STREAM_BATCH_SIZE}
       STREAM_BLOCK_MILLIS: ${STREAM_BLOCK_MILLIS}
+
+      # Bulk Shortening Rate limiting
+      RATE_LIMIT_BULK_MAX: ${RATE_LIMIT_BULK_MAX}
+      RATE_LIMIT_BULK_MINUTES: ${RATE_LIMIT_BULK_MINUTES}
+      BULK_BATCH_SIZE: ${BULK_BATCH_SIZE}
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,3 +77,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
