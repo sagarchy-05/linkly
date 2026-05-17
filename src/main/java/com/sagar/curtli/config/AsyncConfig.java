@@ -12,13 +12,13 @@ import java.util.concurrent.Executor;
 @EnableAsync
 public class AsyncConfig {
 
-    @Value("${linkly.async.core-pool-size}")
+    @Value("${curtli.async.core-pool-size}")
     private int corePoolSize;
 
-    @Value("${linkly.async.max-pool-size}")
+    @Value("${curtli.async.max-pool-size}")
     private int maxPoolSize;
 
-    @Value("${linkly.async.queue-capacity}")
+    @Value("${curtli.async.queue-capacity}")
     private int queueCapacity;
 
     @Bean(name = "clickPublisherExecutor")

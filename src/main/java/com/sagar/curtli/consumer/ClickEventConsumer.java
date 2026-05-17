@@ -21,11 +21,11 @@ public class ClickEventConsumer {
     private final StringRedisTemplate redis;
     private final ClickAggregator aggregator;
 
-    @Value("${linkly.click-stream.name}") private String streamName;
-    @Value("${linkly.click-stream.consumer-group}") private String group;
-    @Value("${linkly.click-stream.consumer-name}") private String consumer;
-    @Value("${linkly.click-stream.batch-size:200}") private int batchSize;
-    @Value("${linkly.click-stream.block-millis:500}") private long blockMillis;
+    @Value("${curtli.click-stream.name}") private String streamName;
+    @Value("${curtli.click-stream.consumer-group}") private String group;
+    @Value("${curtli.click-stream.consumer-name}") private String consumer;
+    @Value("${curtli.click-stream.batch-size:200}") private int batchSize;
+    @Value("${curtli.click-stream.block-millis:500}") private long blockMillis;
 
     @PostConstruct
     public void initGroup() {
@@ -34,7 +34,7 @@ public class ClickEventConsumer {
         } catch (Exception ignored) { /* group already exists */ }
     }
 
-    @Scheduled(fixedDelayString = "${linkly.click-stream.poll-delay:1000}")
+    @Scheduled(fixedDelayString = "${curtli.click-stream.poll-delay:1000}")
     public void consume() {
         List<MapRecord<String, Object, Object>> records = redis.opsForStream().read(
                 Consumer.from(group, consumer),

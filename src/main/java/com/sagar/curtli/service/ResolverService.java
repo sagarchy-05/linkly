@@ -21,7 +21,7 @@ public class ResolverService {
     private final LinkRepository repository;
     private final StringRedisTemplate redis;
 
-    @Value("${linkly.cache-ttl-seconds}") private long cacheTtl;
+    @Value("${curtli.cache-ttl-seconds}") private long cacheTtl;
 
     @Transactional(readOnly = true)
     public String resolve(String shortCode) {

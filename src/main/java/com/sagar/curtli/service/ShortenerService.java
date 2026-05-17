@@ -26,9 +26,9 @@ public class ShortenerService {
     private final LinkRepository repository;
     private final StringRedisTemplate redis;
 
-    @Value("${linkly.base-url}") private String baseUrl;
-    @Value("${linkly.cache-ttl-seconds}") private long cacheTtl;
-    @Value("${linkly.bulk-batch-size}") private int maxBulkSize;
+    @Value("${curtli.base-url}") private String baseUrl;
+    @Value("${curtli.cache-ttl-seconds}") private long cacheTtl;
+    @Value("${curtli.bulk-batch-size}") private int maxBulkSize;
 
     /**
      * Intentionally NOT @Transactional: each repository.save() runs in its

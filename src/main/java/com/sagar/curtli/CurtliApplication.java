@@ -8,10 +8,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableAsync
 @EnableScheduling
-public class LinklyApplication {
+public class CurtliApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(LinklyApplication.class, args);
+		SpringApplication.run(CurtliApplication.class, args);
 	}
 
 }

@@ -19,8 +19,8 @@ import java.util.Map;
 @Slf4j
 public class ClickEventPublisher {
     private final StringRedisTemplate redis;
-    @Value("${linkly.click-stream.name}") private String streamName;
-    @Value("${linkly.ip-hash-secret:change-me}") private String secret;
+    @Value("${curtli.click-stream.name}") private String streamName;
+    @Value("${curtli.ip-hash-secret:change-me}") private String secret;
 
     @Async("clickPublisherExecutor")
     public void publish(String shortCode, String ipAddress, String referrer, String userAgent) {
