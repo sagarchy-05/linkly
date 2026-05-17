@@ -2,7 +2,7 @@ services:
   # ---------- PostgreSQL ----------
   postgres:
     image: postgres:16-alpine
-    container_name: linkly-db
+    container_name: curtli-db
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -21,7 +21,7 @@ services:
   # ---------- Redis ----------
   redis:
     image: redis:7-alpine
-    container_name: linkly-redis
+    container_name: curtli-redis
     restart: unless-stopped
     # Enable basic persistence (save every 60 seconds if at least 1 key changed)
     command: redis-server --save 60 1 --loglevel warning
@@ -40,7 +40,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: linkly-app
+    container_name: curtli-app
     restart: unless-stopped
     ports:
       - "${HOST_APP_PORT}:8080"
@@ -52,7 +52,7 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_TIMEOUT: 10s
 
-      LINKLY_BASE_URL: ${LINKLY_BASE_URL}
+      CURTLI_BASE_URL: ${CURTLI_BASE_URL}
       SPRING_PROFILES_ACTIVE: docker
 
       # Async analytics thread pool

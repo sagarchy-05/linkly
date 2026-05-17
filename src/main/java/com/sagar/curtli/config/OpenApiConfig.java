@@ -12,7 +12,7 @@ public class OpenApiConfig {
     public OpenAPI customOpenAPI() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("Linkly API")
+                        .title("Curtli API")
                         .version("1.0.0")
                         .description("Production-grade URL Shortener API with Redis Caching and Analytics."));
     }

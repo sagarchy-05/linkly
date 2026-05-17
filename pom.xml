@@ -9,7 +9,7 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.sagar</groupId>
-	<artifactId>linkly</artifactId>
+	<artifactId>curtli</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name/>
 	<description/>

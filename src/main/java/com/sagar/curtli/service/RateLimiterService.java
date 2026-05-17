@@ -17,9 +17,9 @@ public class RateLimiterService {
     private final StringRedisTemplate redis;
     private DefaultRedisScript<List> script;
 
-    @Value("${linkly.rate-limit.anonymous-per-minute}") private int anonRate;
-    @Value("${linkly.rate-limit.bulk-max}") private int bulkMax;
-    @Value("${linkly.rate-limit.bulk-minutes}") private int bulkMinutes;
+    @Value("${curtli.rate-limit.anonymous-per-minute}") private int anonRate;
+    @Value("${curtli.rate-limit.bulk-max}") private int bulkMax;
+    @Value("${curtli.rate-limit.bulk-minutes}") private int bulkMinutes;
 
     @PostConstruct
     public void init() {
