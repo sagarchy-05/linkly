@@ -68,7 +68,3 @@ logging:
   level:
     com.sagar.linkly: INFO
     org.hibernate.SQL: WARN
-  driver: "json-file"
-  options:
-    max-size: "10m"
-    max-file: "5"

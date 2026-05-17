@@ -8,7 +8,6 @@ import com.sagar.linkly.dto.ShortenResponse;
 import com.sagar.linkly.encoding.Base62;
 import com.sagar.linkly.repository.LinkRepository;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,7 +30,13 @@ public class ShortenerService {
     @Value("${linkly.cache-ttl-seconds}") private long cacheTtl;
     @Value("${linkly.bulk-batch-size}") private int maxBulkSize;
 
-    @Transactional
+    /**
+     * Intentionally NOT @Transactional: each repository.save() runs in its
+     * own transaction (managed by SimpleJpaRepository), which is critical for
+     * the random-code retry loop below — a constraint violation in one
+     * attempt must not poison subsequent attempts. Also avoids populating the
+     * Redis cache before the DB transaction commits.
+     */
     public ShortenResponse shorten(ShortenRequest req) {
         validate(req.longUrl());
 
@@ -51,7 +56,6 @@ public class ShortenerService {
 
             try {
                 link = repository.save(link);
-                repository.flush(); // Force DB constraint check immediately
             } catch (DataIntegrityViolationException e) {
                 throw new IllegalArgumentException("Alias already taken");
             }
@@ -73,7 +77,6 @@ public class ShortenerService {
                     .build();
             try {
                 link = repository.save(tempLink);
-                repository.flush();
             } catch (DataIntegrityViolationException e) {
                 attempts++;
                 log.warn("Collision detected for generated code: {}, retrying...", generatedCode);
