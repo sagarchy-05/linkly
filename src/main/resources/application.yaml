@@ -1,6 +1,9 @@
 spring:
   application:
     name: curtli
+  # Drain in-flight requests on SIGTERM (ECS sends SIGTERM before SIGKILL).
+  lifecycle:
+    timeout-per-shutdown-phase: 25s
   datasource:
     url: ${SPRING_DATASOURCE_URL}
     username: ${SPRING_DATASOURCE_USERNAME}
@@ -36,6 +39,11 @@ server:
   port: 8080
   compression:
     enabled: true
+  # Trust X-Forwarded-* headers from the ALB so RateLimitFilter sees real
+  # client IPs and Spring generates https:// URLs after TLS termination.
+  forward-headers-strategy: framework
+  # Pair with spring.lifecycle.timeout-per-shutdown-phase for graceful drain.
+  shutdown: graceful
 
 curtli:
   base-url: ${CURTLI_BASE_URL:http://localhost:8080}
