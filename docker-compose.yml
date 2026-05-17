@@ -69,6 +69,11 @@ services:
       RATE_LIMIT_BULK_MAX: ${RATE_LIMIT_BULK_MAX}
       RATE_LIMIT_BULK_MINUTES: ${RATE_LIMIT_BULK_MINUTES}
       BULK_BATCH_SIZE: ${BULK_BATCH_SIZE}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     depends_on:
       postgres:
         condition: service_healthy
