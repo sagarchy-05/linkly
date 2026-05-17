@@ -24,7 +24,6 @@
   const $results       = document.getElementById('results');
   const $history       = document.getElementById('history');
   const $historyEmpty  = document.getElementById('history-empty');
-  const $clearHistory  = document.getElementById('clear-history');
   const $toast         = document.getElementById('toast');
 
   const tplRow      = document.getElementById('tpl-row');
@@ -38,7 +37,6 @@
 
   $form.addEventListener('submit', onSubmit);
   $addRow.addEventListener('click', () => addRow());
-  $clearHistory.addEventListener('click', clearHistory);
 
   // ----- Row management -----------------------------------------
 
@@ -93,25 +91,28 @@
   function validateRow(row) {
     clearRowError(row.rowEl);
     if (!row.longUrl) {
-      return 'Please enter a URL.';
+      return { msg: 'Please enter a URL.', target: 'url' };
     }
     if (!/^https?:\/\//i.test(row.longUrl)) {
-      return 'URL must start with http:// or https://';
+      return { msg: 'URL must start with http:// or https://', target: 'url' };
     }
     if (row.longUrl.length > 2048) {
-      return 'URL is too long (max 2048 chars).';
+      return { msg: 'URL is too long (max 2048 chars).', target: 'url' };
     }
     if (row.customAlias && !/^[a-zA-Z0-9_-]{3,16}$/.test(row.customAlias)) {
-      return 'Alias must be 3-16 chars (letters, digits, _ or -).';
+      return { msg: 'Alias must be 3–16 chars (letters, digits, _ or -).', target: 'alias' };
     }
     return null;
   }
 
-  function setRowError(rowEl, msg) {
+  function setRowError(rowEl, msg, target = 'url') {
     const $err = rowEl.querySelector('[data-error]');
     $err.textContent = msg;
     $err.hidden = false;
-    rowEl.querySelector('.input-url').classList.add('invalid');
+    const $field = target === 'alias'
+      ? rowEl.querySelector('.input-alias')
+      : rowEl.querySelector('.input-url');
+    $field.classList.add('invalid');
   }
 
   function clearRowError(rowEl) {
@@ -141,7 +142,7 @@
     for (const row of nonEmpty) {
       const err = validateRow(row);
       if (err) {
-        setRowError(row.rowEl, err);
+        setRowError(row.rowEl, err.msg, err.target);
         hasError = true;
       }
     }
@@ -243,7 +244,10 @@
       return;
     }
     if (err.status === 400 && rows.length === 1) {
-      setRowError(rows[0].rowEl, err.message || 'Invalid request.');
+      // Pick the field to highlight based on what the server complained about.
+      const msg = err.message || 'Invalid request.';
+      const target = /alias/i.test(msg) ? 'alias' : 'url';
+      setRowError(rows[0].rowEl, msg, target);
       return;
     }
     showBanner(err.message || `Unexpected error (${err.status}).`);
@@ -329,25 +333,16 @@
     saveHistory(list);
   }
 
-  function clearHistory() {
-    if (!confirm('Clear all link history? This cannot be undone.')) return;
-    saveHistory([]);
-    renderHistory();
-    showToast('History cleared');
-  }
-
   function renderHistory() {
     const list = loadHistory();
     $history.innerHTML = '';
 
     if (list.length === 0) {
       $historyEmpty.classList.remove('hidden');
-      $clearHistory.classList.add('hidden');
       return;
     }
 
     $historyEmpty.classList.add('hidden');
-    $clearHistory.classList.remove('hidden');
 
     list.forEach((item, i) => {
       const node = tplHistory.content.firstElementChild.cloneNode(true);
