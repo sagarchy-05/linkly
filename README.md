@@ -1,182 +1,131 @@
 # curtli
 
-A production-grade URL shortener. Paste up to 20 links at a time, get back tidy short codes, and have your history quietly remembered in your browser.
+A URL shortener that **counts clicks in hourly buckets without slowing the redirect down**.
 
 Live at **[curtli.com](https://curtli.com)**.
-
-```
-https://docs.google.com/spreadsheets/d/1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT/edit#gid=0
-                                  ↓
-                          curtli.com/aB3xK9p
-```
 
 ---
 
 ## What it does
 
-- **Shortens URLs** with optional custom aliases (`curtli.com/launch-2026`).
-- **Tracks clicks** without blocking the redirect — analytics flow asynchronously through a Redis Stream into a Postgres time-series table.
-- **Rate limits** writes via a Redis-backed token bucket (separate buckets for single and bulk endpoints).
-- **Honors expiry** — links can self-destruct after N days (1–3650), or stay permanent.
-- **Survives Redis outages** on the read path — falls back to Postgres, never 500s on a transient cache hiccup.
-- **Ships with a frontend** — single-page, vanilla JS, dark mode, lives at `src/main/resources/static/`.
+You paste a long URL, you get back a short one. So far, nothing unusual.
 
-## Tech stack
+The interesting part is what happens when somebody **clicks** the short link — because that's where most URL shorteners either give you no analytics, or pay for them with a slow redirect. curtli does neither.
 
-- **Java 21 + Spring Boot 3.3** — Web, Data JPA, Data Redis, Validation, Actuator, Scheduling
-- **PostgreSQL 16** as the source of truth, schema managed by **Flyway**
-- **Redis 7** as cache + rate-limit token bucket + click event stream
-- **Resilience4j** for circuit breakers, **Lombok** for boilerplate, **springdoc-openapi** for Swagger UI
-- **Testcontainers** for integration tests
-- **Vanilla HTML/CSS/JS** for the frontend (no build step)
+## How click analytics work
 
-## Architecture at a glance
+### 1. The redirect doesn't wait for the analytics
 
-### Redirect path (hot, must stay fast)
+When `GET /aB3xK9p` comes in, the controller does the minimum work needed to send a `302`:
 
 ```
-GET /{shortCode}
+GET /aB3xK9p
    │
-   ├─ RateLimitFilter           (skipped — only fires on POST /api/shorten*)
-   ├─ ResolverService
-   │     ├─ Redis GET link:{code}            ──hit──> return long URL
-   │     └─ Postgres SELECT (cache miss)     ──hit──> cache, return
-   ├─ ClickDebouncer            (10s SETNX per shortCode+IP — drops duplicates)
-   ├─ ClickEventPublisher       @Async, fire-and-forget XADD to "click_events"
-   └─ 302 Found  ←─────  Cache-Control: no-store
+   ├─ Resolve long URL    (Redis cache → Postgres fallback)
+   ├─ Hand off the click event to an async thread pool   ← non-blocking
+   └─ Return 302 Found
 ```
 
-Both Redis and the publisher fail-open: redirects never break because analytics infra is sick.
+The handoff is fire-and-forget. If the analytics infrastructure is sick, the redirect still happens in single-digit milliseconds. If the async queue is full, the click is dropped on the floor — analytics is best-effort by design, never load-bearing.
 
-### Click pipeline (cold, eventually consistent)
+### 2. Clicks go into a Redis Stream, not directly to Postgres
+
+The async worker doesn't write to Postgres. It writes one record to a Redis Stream called `click_events`:
 
 ```
-ClickEventPublisher → Redis Stream "click_events"
-                          │
-                          ▼
-ClickEventConsumer  (@Scheduled, polls every ~1s, configurable)
-   ├─ XREADGROUP up to N records
-   ├─ ClickAggregator.flush()
-   │     ├─ UPDATE links.click_count += N        (lifetime total)
-   │     └─ UPSERT click_stats(link_id, hour)    (hourly time-series)
-   └─ XACK each record
+XADD click_events * shortCode=aB3xK9p ipHash=… referrer=… ts=…
 ```
 
-`consumer-name` reads from `$HOSTNAME` so multi-replica deployments share work via Redis Streams' consumer group semantics.
+Redis Streams act as a durable buffer with consumer-group semantics. If you scale to multiple app instances, they share work — each replica gets its own slice of the events via its `$HOSTNAME`-derived consumer name.
 
-### Write path
+### 3. A scheduled consumer drains the stream in batches
 
-`POST /api/shorten` validates, then:
+Every ~1 second (configurable), a `@Scheduled` job runs on every app instance:
 
-- **Custom alias**: try to `INSERT`, catch `DataIntegrityViolationException` → "alias already taken" (avoids the TOCTOU race of pre-checking).
-- **Auto code**: random 7-char Base62 via `SecureRandom`. 62⁷ ≈ 3.5 trillion possible values — collision retry only ever fires in pathological cases. Then cache the result with TTL bounded by the link's own expiry, so cached entries can't outlive expired links.
+```
+XREADGROUP curtli-group $HOSTNAME COUNT 1500 BLOCK 250ms
+   │
+   ▼
+ClickAggregator.flush(events)
+```
+
+The aggregator does two things, and this is where the cost savings come from.
+
+### 4. Hourly bucketing — N clicks become 1 DB write
+
+Each event has a `shortCode` and a timestamp. The aggregator:
+
+1. **Groups events by `shortCode`** within the batch.
+2. **Truncates "now" to the hour** to get a `bucket_hour`.
+3. For each `(shortCode, bucket_hour)` pair, issues a Postgres **UPSERT** against `click_stats`:
+
+```sql
+INSERT INTO click_stats (link_id, bucket_hour, click_count)
+VALUES (:linkId, :bucketHour, :count)
+ON CONFLICT (link_id, bucket_hour)
+DO UPDATE SET click_count = click_stats.click_count + EXCLUDED.click_count
+```
+
+So 500 clicks on the same short link in the same hour produce **one** DB row — and on subsequent flushes within that hour, **one** UPDATE that increments the counter. Not 500 inserts. Not 500 row locks. Not 500 round-trips. One.
+
+The `click_stats` table ends up looking like this:
+
+| link_id | bucket_hour              | click_count |
+|---------|--------------------------|-------------|
+| 42      | 2026-05-17 14:00:00+00   | 1283        |
+| 42      | 2026-05-17 15:00:00+00   | 947         |
+| 42      | 2026-05-17 16:00:00+00   | 1102        |
+| 99      | 2026-05-17 14:00:00+00   | 12          |
+
+Which is exactly what you want for "clicks per hour over the last 24h" charts — no rollup query needed, no scanning a raw events table, just a range scan on `(link_id, bucket_hour DESC)`.
+
+A separate lifetime counter on the `links` table gets the same `+= N` treatment in the same transaction, so the all-time total stays in sync.
+
+### 5. Trade-offs
+
+- **No sub-hour resolution.** If you need "clicks per minute," this design throws that information away. The reasoning: minute-level resolution would mean 60× more rows for a marginal product win.
+- **Eventually consistent.** A click registered now shows up in the `click_stats` table on the next consumer tick — typically within 1–2 seconds, never more than a few. The `links.click_count` lifetime total has the same lag.
+- **Duplicate-click debounce, not de-dup.** A 10-second Redis `SETNX` per `(shortCode, IP)` collapses retries, double-clicks, browser prefetches, and bot follow-throughs that hit within 10s of each other. It's a heuristic, not perfect — but it's a single Redis round-trip and it knocks out the obvious noise.
+
+## What else it does
+
+- **Custom aliases** — `POST /api/shorten` accepts an optional `customAlias` (`[a-zA-Z0-9_-]{3,16}`). Unique-constraint race is handled by attempting the insert and catching the violation, not pre-checking.
+- **Bulk shortening** — `POST /api/bulk-shorten` accepts an array, runs each through the same path, and returns a partial-success body so one bad URL doesn't fail the whole batch.
+- **Expiry** — `expiresInDays` is validated `1..3650`, cache TTL is bounded by the link's own expiry so a cached entry never outlives the link itself.
+- **Rate limiting** — Redis-backed token bucket implemented in a single atomic Lua script. Separate buckets for single (`10/min/IP`) and bulk (env-configurable, default 1 per 5 minutes per IP).
+- **Random Base62 short codes** — 7 chars from `SecureRandom`, 62⁷ ≈ 3.5 trillion possible values. Codes are unguessable and the keyspace doesn't visibly leak how many links exist.
 
 ## Quick start
-
-You need Docker installed. That's it.
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-Then open **http://localhost:8080/**.
-
-Three containers come up: Postgres, Redis, and the Spring Boot app. Flyway runs the migrations on first boot. The app waits on healthchecks so you can `docker compose up` cleanly.
-
-## Configuration
-
-All knobs come from environment variables (see `.env.example`):
-
-| Variable | Default | What it controls |
-|---|---|---|
-| `POSTGRES_DB`, `DB_USERNAME`, `DB_PASSWORD` | `curtli`, `postgres`, `postgres` | Postgres credentials |
-| `HOST_DB_PORT` | `5433` | Postgres port on the host |
-| `HOST_REDIS_PORT` | `6379` | Redis port on the host |
-| `HOST_APP_PORT` | `8080` | App port on the host |
-| `CURTLI_BASE_URL` | `http://localhost:8080` | Used to build `shortUrl` in responses |
-| `ASYNC_CORE_POOL` / `ASYNC_MAX_POOL` / `ASYNC_QUEUE_CAPACITY` | `8` / `32` / `3000` | Click publisher thread pool |
-| `STREAM_POLL_DELAY` / `STREAM_BATCH_SIZE` / `STREAM_BLOCK_MILLIS` | `1000` / `1500` / `250` | Consumer tuning |
-| `RATE_LIMIT_BULK_MAX` / `RATE_LIMIT_BULK_MINUTES` | (env-defined) | Bulk shorten rate limit per IP |
-| `BULK_BATCH_SIZE` | (env-defined) | Max URLs per bulk request |
-
-Single-shorten rate limit is `10/minute/IP` (hard-coded in `application.yaml`).
+Open **http://localhost:8080/**. Postgres, Redis, and the app come up together; Flyway runs the migrations on first boot.
 
 ## API
 
-| Method | Path | Body | Purpose |
-|---|---|---|---|
-| `POST` | `/api/shorten` | `ShortenRequest` | Single shorten |
-| `POST` | `/api/bulk-shorten` | `List<ShortenRequest>` | Bulk (partial-success shape) |
-| `GET` | `/{shortCode}` | — | 302 redirect (or 404 / 410) |
-| `GET` | `/actuator/health` | — | Liveness + readiness |
-| `GET` | `/actuator/prometheus` | — | Metrics |
-| `GET` | `/swagger-ui.html` | — | API docs |
+| Method | Path                  | Notes |
+|--------|-----------------------|-------|
+| `POST` | `/api/shorten`        | Single shorten. Returns `ShortenResponse`. |
+| `POST` | `/api/bulk-shorten`   | Up to 20 URLs. Partial-success response. |
+| `GET`  | `/{shortCode}`        | 302 to the long URL (or 404 / 410). |
+| `GET`  | `/swagger-ui.html`    | Interactive API docs. |
+| `GET`  | `/actuator/prometheus`| Metrics. |
 
-### `ShortenRequest`
-
-```json
-{
-  "longUrl": "https://example.com/...",
-  "customAlias": "my-link",        // optional, [a-zA-Z0-9_-]{3,16}
-  "expiresInDays": 30               // optional, null = permanent, 1..3650
-}
-```
-
-### `BulkShortenResponse` (partial success)
+`ShortenRequest`:
 
 ```json
 {
-  "successful": [{ "shortCode": "aB3xK9p", "shortUrl": "...", "longUrl": "..." }],
-  "failed":     [{ "longUrl": "...", "attemptedAlias": "taken", "errorMessage": "Alias already taken" }]
+  "longUrl": "https://example.com/something/long",
+  "customAlias": "launch-2026",
+  "expiresInDays": 30
 }
 ```
 
-Returns `200` for any-success, `400` only if every URL in the batch failed.
+`customAlias` and `expiresInDays` are optional. `expiresInDays` is `null` for permanent links.
 
-## Data model
+## Stack
 
-Two tables (so far):
-
-- **`links`** — short code, long URL, expiry, lifetime click counter, soft-delete flag.
-- **`click_stats`** — `(link_id, bucket_hour, click_count)` with a unique constraint enabling `INSERT ... ON CONFLICT DO UPDATE` aggregation.
-
-Flyway migrations live in `src/main/resources/db/migration/`.
-
-## Project layout
-
-```
-src/
-├── main/
-│   ├── java/com/sagar/curtli/
-│   │   ├── CurtliApplication.java
-│   │   ├── config/       AsyncConfig, RateLimitConfig, RedisConfig, OpenApiConfig
-│   │   ├── controller/   RedirectController, ShortenerController
-│   │   ├── consumer/     ClickEventConsumer, ClickAggregator
-│   │   ├── domain/       Link, ClickStat (JPA entities)
-│   │   ├── dto/          ShortenRequest/Response, BulkShortenResponse, BulkError
-│   │   ├── encoding/     Base62 (random + encode/decode)
-│   │   ├── exception/    GlobalExceptionHandler + typed exceptions
-│   │   ├── filter/       RateLimitFilter
-│   │   ├── repository/   LinkRepository, ClickStatRepository
-│   │   └── service/      Shortener, Resolver, ClickEventPublisher, ClickDebouncer, RateLimiter, GeoIp
-│   └── resources/
-│       ├── application.yaml
-│       ├── db/migration/  V1__init.sql, V2__add_click_stats.sql
-│       ├── scripts/       token_bucket.lua (atomic rate-limit decisions)
-│       └── static/        index.html, styles.css, app.js  (landing page)
-└── test/                  Testcontainers config, app context test
-```
-
-## Design notes worth knowing
-
-- **Cache-aside, not write-through.** Postgres is the source of truth; Redis is best-effort with a TTL bounded by the link's own expiry. Cache writes log-and-continue on failure.
-- **Analytics is best-effort.** The async publisher pool drops on overload (`RejectedExecutionHandler` no-ops). Better to lose a click count than to slow down a redirect.
-- **No TOCTOU on alias allocation.** We don't pre-check `existsByShortCode` for custom aliases — we just attempt the insert and catch the unique-constraint violation. Two concurrent requests for the same alias result in exactly one success.
-- **Random Base62, not sequential.** `Base62.encode(id)` would give early users codes like `/1`, `/2` — enumerable, ugly, leak the link count. Instead, each code is 7 random Base62 chars from `SecureRandom`, giving a 3.5T keyspace.
-- **Idle-driven consumer**, not idle-detecting. `@Scheduled(fixedDelay)` runs on the Spring scheduler thread on a fixed cadence — it has nothing to do with server load. Don't confuse "fires when free" with "fires on a timer."
-- **Frontend stays on the client.** Link history lives in `localStorage`; there's no anonymous session token, no `user_id` plumbing. Clearing the browser clears the history.
-
-## License
-
-Source-available, no specific license attached yet.
+Java 21 · Spring Boot 3.3 · PostgreSQL 16 (Flyway) · Redis 7 · Resilience4j · vanilla HTML/CSS/JS frontend · Docker Compose.
