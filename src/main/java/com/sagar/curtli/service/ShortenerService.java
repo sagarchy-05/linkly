@@ -60,7 +60,7 @@ public class ShortenerService {
                 throw new IllegalArgumentException("Alias already taken");
             }
 
-            cachePut(alias, link.getLongUrl());
+            cachePut(alias, link.getLongUrl(), link.getExpiresAt());
             return new ShortenResponse(alias, baseUrl + "/" + alias, link.getLongUrl());
         }
 
@@ -86,7 +86,7 @@ public class ShortenerService {
             }
         }
 
-        cachePut(link.getShortCode(), link.getLongUrl());
+        cachePut(link.getShortCode(), link.getLongUrl(), link.getExpiresAt());
         return new ShortenResponse(link.getShortCode(), baseUrl + "/" + link.getShortCode(), link.getLongUrl());
     }
 
@@ -128,18 +128,38 @@ public class ShortenerService {
         if (url.length() > 2048) throw new IllegalArgumentException("URL too long");
     }
 
+    /**
+     * Bean Validation (@Min/@Max on the DTO) covers the /api/shorten endpoint.
+     * For the bulk path, list elements are NOT cascade-validated (intentionally,
+     * so bulk can keep its per-row partial-success semantics), so we re-check
+     * the same rules here. The throw becomes an IllegalArgumentException which
+     * bulkShorten() catches and reports per row.
+     */
     private OffsetDateTime computeExpiry(Long expiresInDays) {
-        if (expiresInDays == null || expiresInDays <= 0) {
-            return null;
+        if (expiresInDays == null) return null;
+        if (expiresInDays < 1) {
+            throw new IllegalArgumentException("expiresInDays must be at least 1");
+        }
+        if (expiresInDays > 3650) {
+            throw new IllegalArgumentException("expiresInDays must be at most 3650 (10 years)");
         }
         return OffsetDateTime.now().plusDays(expiresInDays);
     }
 
     private String cacheKey(String code) { return "link:" + code; }
 
-    private void cachePut(String code, String longUrl) {
+    /**
+     * Cache the long URL with a TTL bounded by the link's own expiry, so a
+     * cached entry can never outlive its link.
+     */
+    private void cachePut(String code, String longUrl, OffsetDateTime expiresAt) {
+        long ttl = cacheTtl;
+        if (expiresAt != null) {
+            long secsLeft = Duration.between(OffsetDateTime.now(), expiresAt).getSeconds();
+            if (secsLeft < ttl) ttl = Math.max(secsLeft, 1);
+        }
         try {
-            redis.opsForValue().set(cacheKey(code), longUrl, Duration.ofSeconds(cacheTtl));
+            redis.opsForValue().set(cacheKey(code), longUrl, Duration.ofSeconds(ttl));
         } catch (Exception e) {
             log.warn("Cache write failed for code={}: {}", code, e.getMessage());
         }

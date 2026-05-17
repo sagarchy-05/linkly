@@ -50,6 +50,17 @@
     const $remove = node.querySelector('.row-remove');
     $remove.addEventListener('click', () => removeRow(node));
 
+    // Permanent checkbox disables (and clears) the days input.
+    const $check = node.querySelector('.check-input');
+    const $days  = node.querySelector('.input-days');
+    $check.addEventListener('change', () => {
+      $days.disabled = $check.checked;
+      if ($check.checked) {
+        $days.value = '';
+        $days.classList.remove('invalid');
+      }
+    });
+
     // Focus the URL input of the just-added row (skip the first auto-add)
     if (count > 0) {
       node.querySelector('.input-url').focus();
@@ -85,7 +96,21 @@
   function readRow(rowEl) {
     const longUrl     = rowEl.querySelector('.input-url').value.trim();
     const customAlias = rowEl.querySelector('.input-alias').value.trim();
-    return { rowEl, longUrl, customAlias: customAlias || null };
+    const isPermanent = rowEl.querySelector('.check-input').checked;
+    const daysVal     = rowEl.querySelector('.input-days').value.trim();
+
+    // Permanent always wins. Empty days = no expiry (null).
+    let expiresInDays = null;
+    if (!isPermanent && daysVal !== '') {
+      expiresInDays = Number(daysVal);  // could be NaN if input is garbage
+    }
+
+    return {
+      rowEl,
+      longUrl,
+      customAlias: customAlias || null,
+      expiresInDays,
+    };
   }
 
   function validateRow(row) {
@@ -102,6 +127,18 @@
     if (row.customAlias && !/^[a-zA-Z0-9_-]{3,16}$/.test(row.customAlias)) {
       return { msg: 'Alias must be 3–16 chars (letters, digits, _ or -).', target: 'alias' };
     }
+    if (row.expiresInDays !== null) {
+      const n = row.expiresInDays;
+      if (!Number.isFinite(n) || !Number.isInteger(n)) {
+        return { msg: 'Expiry must be a whole number of days.', target: 'days' };
+      }
+      if (n < 1) {
+        return { msg: 'Expiry must be at least 1 day.', target: 'days' };
+      }
+      if (n > 3650) {
+        return { msg: "Expiry can't exceed 3650 days (10 years).", target: 'days' };
+      }
+    }
     return null;
   }
 
@@ -109,10 +146,13 @@
     const $err = rowEl.querySelector('[data-error]');
     $err.textContent = msg;
     $err.hidden = false;
-    const $field = target === 'alias'
-      ? rowEl.querySelector('.input-alias')
-      : rowEl.querySelector('.input-url');
-    $field.classList.add('invalid');
+    let $field;
+    switch (target) {
+      case 'alias': $field = rowEl.querySelector('.input-alias'); break;
+      case 'days':  $field = rowEl.querySelector('.input-days');  break;
+      default:      $field = rowEl.querySelector('.input-url');
+    }
+    if ($field) $field.classList.add('invalid');
   }
 
   function clearRowError(rowEl) {
@@ -121,6 +161,7 @@
     $err.hidden = true;
     rowEl.querySelector('.input-url').classList.remove('invalid');
     rowEl.querySelector('.input-alias').classList.remove('invalid');
+    rowEl.querySelector('.input-days').classList.remove('invalid');
   }
 
   // ----- Submission ---------------------------------------------
@@ -154,7 +195,7 @@
       const payload = nonEmpty.map(r => ({
         longUrl: r.longUrl,
         customAlias: r.customAlias,
-        expiresInDays: null,
+        expiresInDays: r.expiresInDays,
       }));
 
       const { successful, failed } = payload.length === 1
@@ -177,6 +218,11 @@
         if (i === 0) {
           r.querySelector('.input-url').value = '';
           r.querySelector('.input-alias').value = '';
+          const $days  = r.querySelector('.input-days');
+          const $check = r.querySelector('.check-input');
+          $days.value = '';
+          $days.disabled = false;
+          $check.checked = false;
           clearRowError(r);
         } else {
           r.remove();
@@ -246,7 +292,9 @@
     if (err.status === 400 && rows.length === 1) {
       // Pick the field to highlight based on what the server complained about.
       const msg = err.message || 'Invalid request.';
-      const target = /alias/i.test(msg) ? 'alias' : 'url';
+      let target = 'url';
+      if (/alias/i.test(msg))                   target = 'alias';
+      else if (/expires?|days|expiry/i.test(msg)) target = 'days';
       setRowError(rows[0].rowEl, msg, target);
       return;
     }

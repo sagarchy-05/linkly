@@ -227,13 +227,57 @@ h1, h2, h3, p { margin: 0; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ===== Add-row zone (small, centered) ===== */
-.add-row-zone {
+/* ===== Row extras (expires + permanent) ===== */
+.row-extras {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-left: 4px;
+}
+.extras-label {
+  font-size: 13px;
+  color: var(--text-soft);
+}
+.input-days {
+  width: 72px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  text-align: center;
+}
+.input-days:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: var(--surface);
+}
+.check-permanent {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 18px 0 22px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  margin-left: auto;
+  transition: color 200ms var(--ease-in-out);
+}
+.check-permanent:hover { color: var(--text); }
+.check-input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* ===== Form footer (centered: + and Shorten, side by side) ===== */
+.form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 22px;
 }
 .btn-add {
   width: 36px;
@@ -269,10 +313,13 @@ h1, h2, h3, p { margin: 0; }
 .btn-add svg { width: 16px; height: 16px; }
 
 .row-counter {
+  display: block;
+  text-align: center;
+  margin: 12px 0 0;
   font-size: 11px;
   color: var(--text-soft);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -306,6 +353,8 @@ h1, h2, h3, p { margin: 0; }
   color: #0a0a0c;
   border-color: var(--primary);
   font-weight: 600;
+  padding: 12px 28px;
+  font-size: 15px;
 }
 .btn-primary:hover {
   background: var(--primary-700);

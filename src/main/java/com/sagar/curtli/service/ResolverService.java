@@ -39,15 +39,24 @@ public class ResolverService {
             throw new LinkExpiredException(shortCode);
         }
 
-        cachePut(shortCode, link.getLongUrl());
+        cachePut(shortCode, link.getLongUrl(), link.getExpiresAt());
         return link.getLongUrl();
     }
 
     private String cacheKey(String code) { return "link:" + code; }
 
-    private void cachePut(String code, String longUrl) {
+    /**
+     * Cache the long URL with a TTL bounded by the link's own expiry, so a
+     * cached entry can never outlive its link.
+     */
+    private void cachePut(String code, String longUrl, OffsetDateTime expiresAt) {
+        long ttl = cacheTtl;
+        if (expiresAt != null) {
+            long secsLeft = Duration.between(OffsetDateTime.now(), expiresAt).getSeconds();
+            if (secsLeft < ttl) ttl = Math.max(secsLeft, 1);
+        }
         try {
-            redis.opsForValue().set(cacheKey(code), longUrl, Duration.ofSeconds(cacheTtl));
+            redis.opsForValue().set(cacheKey(code), longUrl, Duration.ofSeconds(ttl));
         } catch (Exception e) {
             log.warn("Cache write failed for code={}: {}", code, e.getMessage());
         }
